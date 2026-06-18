@@ -16,7 +16,7 @@ analytic_tools.register(mcp)
 leave_tools.register(mcp)
 
 
-    
+
 
 @mcp.resource("company://leave-policy")
 def leave_policy_resource():
@@ -30,4 +30,5 @@ def company_policy_resource():
 
 
 if __name__ == "__main__":
-    mcp.run()
+    # mcp.run()
+    mcp.run(transport="streamable-http")

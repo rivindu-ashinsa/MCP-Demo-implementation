@@ -5,7 +5,6 @@ def leave_policy():
         Medical Leave : 10
         """
 
-
 def company_policy():
     return """
         Employees must work 8 hours per day.

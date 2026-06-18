@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-EMPLOYEE_FILE = Path("data/employees.json")
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent.parent  # go up from services/ to project root
+EMPLOYEE_FILE = BASE_DIR / "data" / "employees.json"
+
 
 
 def load_employees():

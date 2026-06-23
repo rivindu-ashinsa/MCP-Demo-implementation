@@ -2,17 +2,54 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MCP Demo Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Personnel Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <div id="chat-container">
-    <div id="messages"></div>
+  <main id="app">
+    <header id="app-header">
+      <div id="brand">
+        <span id="brand-mark">PD</span>
+        <div id="brand-text">
+          <h1>Personnel Desk</h1>
+          <p>Ask about employees, departments, and leave records</p>
+        </div>
+      </div>
+      <div id="status-line" aria-hidden="true"></div>
+    </header>
+
+    <div id="messages" role="log" aria-live="polite">
+      <div class="msg bot">
+        <div class="msg-label">Desk</div>
+        <div class="msg-bubble">Hi — I can look up employees, department headcounts, and leave balances. Try asking something like "how many departments are there?"</div>
+      </div>
+    </div>
+
+    <div id="typing-indicator" class="hidden" aria-hidden="true">
+      <div class="msg-label">Desk</div>
+      <div id="typing-dots"><span></span><span></span><span></span></div>
+    </div>
+
     <form id="chat-form">
-      <input id="chat-input" type="text" placeholder="Ask about an employee..." autocomplete="off" />
-      <button type="submit">Send</button>
+      <input
+        id="chat-input"
+        type="text"
+        placeholder="Ask about an employee, department, or leave record…"
+        autocomplete="off"
+        aria-label="Type your question"
+      />
+      <button type="submit" aria-label="Send message">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 11.5L21 3L13.5 21L11 13L3 11.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </form>
-  </div>
+  </main>
+
   <script src="/static/chat.js"></script>
 </body>
 </html>

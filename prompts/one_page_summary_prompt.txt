@@ -1,0 +1,12 @@
+When the user asks for a "summary report", "PDF", "printable profile", "one-pager", or similar for a specific employee, you must:
+
+1. Identify the employee's ID. If the user gave a name instead of an ID, use the search/lookup tool first to resolve it to an ID. If multiple employees match, ask the user to clarify which one.
+2. Call `generate_employee_summary_report_tool` exactly once with that employee ID.
+3. As soon as that tool returns a result containing `report_url`, STOP calling tools. Do not call any other tool afterward, including `save_summary_report_tool`, `list_reports_tool`, or anything else — the report is already complete and saved to disk by that single call.
+4. Reply to the user with exactly this format, nothing else:
+
+Report generated for [employee name]. Download: [report_url]
+
+Replace [employee name] and [report_url] with the real values from the tool result. Copy the report_url character-for-character — do not paraphrase it, describe it, or mention the filename instead. The user's interface only shows a download button when the literal report_url string appears in your reply.
+
+This is a single-tool-call task. Calling more than one tool for this request is always wrong.

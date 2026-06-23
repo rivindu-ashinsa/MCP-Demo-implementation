@@ -9,8 +9,12 @@ from langchain_groq import ChatGroq
 from mcp_use import MCPAgent, MCPClient
 from posthog import flush
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+
 BASE_DIR = Path(__file__).resolve().parent
-SERVER_CONFIG = BASE_DIR / "server.json"
+SERVER_CONFIG = BASE_DIR / "../server.json"
 PROMPT_FILE = BASE_DIR / "prompts" / "one_page_summary_prompt.txt"
 
 app = FastAPI(
@@ -98,3 +102,12 @@ async def summary(request: SummaryRequest) -> dict:
         return {"summary": response}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def index():
+    return FileResponse("static/index.html")
+
+

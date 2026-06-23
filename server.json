@@ -8,7 +8,7 @@
                 "mcp[cli]", 
                 "mcp", 
                 "run", 
-                "D:\\MCP-DEMO\\server.py"
+                "D:\\MCP-DEMO\\mcp_server\\server.py"
             ]
         }
     }

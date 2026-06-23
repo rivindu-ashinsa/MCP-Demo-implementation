@@ -1,4 +1,4 @@
-from services.employee_service import list_employees
+from services.employee_service import list_employees, update_employee
 
 
 def list_departments():
@@ -7,6 +7,7 @@ def list_departments():
     departments = {
         employee["department"]
         for employee in employees
+        if "department" in employee
     }
 
     return list(departments)
@@ -20,3 +21,7 @@ def get_department(emp_id: int):
             return employee["department"]
 
     return None
+
+
+def update_employee_department(emp_id: int, department: str):
+    return update_employee(emp_id, {"department": department})

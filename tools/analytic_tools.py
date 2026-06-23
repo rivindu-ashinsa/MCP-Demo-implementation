@@ -33,3 +33,13 @@ def register(mcp):
             summary = department_summary_tool()
         """
         return department_summary()
+
+    @mcp.tool()
+    def list_reports_tool():
+        """Tool to return saved summary reports."""
+        return list_reports()
+
+    @mcp.tool()
+    def save_summary_report_tool(title: str, summary: str):
+        """Tool to save a summary report."""
+        return save_summary_report(title, summary)

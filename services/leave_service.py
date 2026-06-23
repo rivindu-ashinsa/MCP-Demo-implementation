@@ -7,7 +7,7 @@ def get_leave_balance(emp_id: int):
     if not employee:
         return None
 
-    return employee["leave_balance"]
+    return employee.get("leave_balance")
 
 
 def apply_leave(emp_id: int, days: int):
@@ -18,23 +18,36 @@ def apply_leave(emp_id: int, days: int):
     4. Save changes
     """
     employees = load_employees()
-    
+
     employee = None
     for emp in employees:
         if emp["id"] == emp_id:
             employee = emp
             break
 
-    # 3. Validation checks
     if not employee:
-        print(f"Employee {emp_id} not found.")
         return None
 
-    if employee["leave_balance"] < days:
-        print("Insufficient leave balance.")
+    if employee.get("leave_balance", 0) < days:
         return None
 
-    employee["leave_balance"] -= days
-    
+    employee["leave_balance"] = employee.get("leave_balance", 0) - days
+    save_employees(employees)
+    return employee
+
+
+def set_leave_balance(emp_id: int, balance: int):
+    employees = load_employees()
+
+    employee = None
+    for emp in employees:
+        if emp["id"] == emp_id:
+            employee = emp
+            break
+
+    if not employee:
+        return None
+
+    employee["leave_balance"] = balance
     save_employees(employees)
     return employee

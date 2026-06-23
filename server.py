@@ -1,5 +1,9 @@
 
 from mcp.server.fastmcp import FastMCP
+# import sys
+# from pathlib import Path
+# sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from tools import (employee_tools, department_tools, analytic_tools, leave_tools)
 
 
@@ -30,5 +34,5 @@ def company_policy_resource():
 
 
 if __name__ == "__main__":
-    # mcp.run()
-    mcp.run(transport="streamable-http")
+    mcp.run()
+    # mcp.run(transport="streamable-http")

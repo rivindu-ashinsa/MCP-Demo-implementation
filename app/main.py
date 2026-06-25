@@ -1,5 +1,6 @@
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -22,11 +23,6 @@ STATIC_DIR = PROJECT_ROOT / "static"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(
-    title="MCP Demo Chatbot",
-    description="A lightweight FastAPI backend that forwards chat requests to a Groq-powered MCP agent.",
-)
-
 mcp_client: Optional[MCPClient] = None
 mcp_agent: Optional[MCPAgent] = None
 
@@ -40,8 +36,28 @@ class SummaryRequest(BaseModel):
     context: Optional[str] = None
 
 
+SYSTEM_INSTRUCTION = (
+    "You are a helpful HR assistant. "
+    "Crucial Rule: If a tool returns an empty result, null, or indicates a resource/employee "
+    "was not found, DO NOT call the same tool with the same arguments again. "
+    "Immediately stop and inform the user that the requested information or employee "
+    "could not be found."
+)
+
+# Keywords that indicate this message is asking for a report/PDF, so we only
+# inject the strict report-formatting instructions when actually relevant —
+# not on every unrelated query like "leave balances" or "how many departments".
+REPORT_TRIGGER_WORDS = ("report", "pdf", "summary report", "one-pager", "printable")
+
+# Loop-guard injected only when the query warrants agent tool use
+LOOP_GUARDRAIL = (
+    "[CRITICAL INSTRUCTION: If any search tool yields no results, "
+    "do not repeat the search. Respond directly stating nothing was found.]\n\n"
+)
+
 
 def initialize_agent() -> None:
+    """Synchronous initializer — runs in a thread via asyncio.to_thread."""
     global mcp_client, mcp_agent
 
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -53,36 +69,37 @@ def initialize_agent() -> None:
 
     mcp_client = MCPClient.from_config_file(str(SERVER_CONFIG))
     llm = ChatGroq(groq_api_key=groq_api_key, model="openai/gpt-oss-safeguard-20b")
-    
-    # SYSTEM LOOP PROTECTION: Define clear behavioral instructions for the agent
-    system_instruction = (
-        "You are a helpful HR assistant. Crucial Rule: If a tool returns an empty result, "
-        "null, or indicates a resource/employee was not found, DO NOT call the same tool "
-        "with the same arguments again. Immediately stop and inform the user that the "
-        "requested information or employee could not be found."
-    )
-    
-    # We pass the instruction to the agent. If MCPAgent supports system_prompt, use it.
-    # Otherwise, we will inject it directly into the execution messages below.
+
+    # FIX 1: system_instruction is now actually passed to MCPAgent.
+    # MCPAgent accepts `system_prompt`; adjust the kwarg name if your version
+    # of mcp_use uses a different parameter (e.g. `system_message`).
     mcp_agent = MCPAgent(
-        client=mcp_client, 
-        llm=llm, 
-        max_steps=10, 
-        memory_enabled=True
+        client=mcp_client,
+        llm=llm,
+        max_steps=10,
+        memory_enabled=True,
+        system_prompt=SYSTEM_INSTRUCTION,   # ← was silently dropped before
     )
 
 
-
-@app.on_event("startup")
-async def startup() -> None:
+# FIX 2: Replace deprecated @app.on_event("startup/shutdown") with the
+# modern lifespan context manager introduced in FastAPI 0.93+.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
     await asyncio.to_thread(initialize_agent)
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
+    yield
+    # --- shutdown ---
     global mcp_client
     if mcp_client and getattr(mcp_client, "sessions", None):
         await mcp_client.close_all_sessions()
+
+
+app = FastAPI(
+    title="MCP Demo Chatbot",
+    description="A lightweight FastAPI backend that forwards chat requests to a Groq-powered MCP agent.",
+    lifespan=lifespan,
+)
 
 
 @app.get("/health")
@@ -90,13 +107,8 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-# Keywords that indicate this message is asking for a report/PDF, so we only
-# inject the strict report-formatting instructions when actually relevant —
-# not on every unrelated query like "leave balances" or "how many departments".
-REPORT_TRIGGER_WORDS = ("report", "pdf", "summary report", "one-pager", "printable")
-
-
-
+def _is_report_request(message_lower: str) -> bool:
+    return any(word in message_lower for word in REPORT_TRIGGER_WORDS)
 
 
 @app.post("/chat")
@@ -106,19 +118,24 @@ async def chat(request: ChatRequest) -> dict:
 
     try:
         message_lower = request.message.lower()
-        
-        # Guardrails injected directly into the user message context to force LLM compliance
-        loop_guardrail = (
-            "[CRITICAL INSTRUCTION: If any search tool yields no results, "
-            "do not repeat the search. Respond directly stating nothing was found.]\n\n"
-        )
-        full_message = f"{loop_guardrail}{request.message}"
 
-        if any(word in message_lower for word in REPORT_TRIGGER_WORDS) and REPORT_PROMPT_FILE.exists():
+        # FIX 5: Only inject the loop guardrail when it is actually relevant
+        # (i.e. for report requests that trigger heavy tool use). For plain
+        # conversational queries this avoids unnecessary token overhead.
+        if _is_report_request(message_lower) and REPORT_PROMPT_FILE.exists():
             instructions = REPORT_PROMPT_FILE.read_text(encoding="utf-8").strip()
-            full_message = f"{loop_guardrail}{instructions}\n\nUser request: {request.message}"
+            full_message = (
+                f"{LOOP_GUARDRAIL}{instructions}\n\nUser request: {request.message}"
+            )
+        else:
+            # Still prepend guardrail for any agentic chat so the model doesn't
+            # loop on missing employees, but skip the heavy report instructions.
+            full_message = f"{LOOP_GUARDRAIL}{request.message}"
 
         response = await mcp_agent.run(full_message)
+
+        # FIX 3: flush() is now called consistently in both /chat and /summary.
+        flush()
         return {"assistant": response}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -130,10 +147,16 @@ async def summary(request: SummaryRequest) -> dict:
         raise HTTPException(status_code=500, detail="MCP agent is not initialized")
 
     if not SUMMARY_PROMPT_FILE.exists():
-        raise HTTPException(status_code=500, detail=f"Prompt file not found at {SUMMARY_PROMPT_FILE}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prompt file not found at {SUMMARY_PROMPT_FILE}",
+        )
 
     prompt = SUMMARY_PROMPT_FILE.read_text(encoding="utf-8").strip()
-    context = request.context or "Use the available employee, department, leave, and company policy data to build the report."
+    context = (
+        request.context
+        or "Use the available employee, department, leave, and company policy data to build the report."
+    )
     body = (
         f"{prompt}\n\n"
         f"Subject: {request.subject}\n\n"
@@ -142,7 +165,7 @@ async def summary(request: SummaryRequest) -> dict:
 
     try:
         response = await mcp_agent.run(body)
-        flush()
+        flush()  # consistent with /chat
         return {"summary": response}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

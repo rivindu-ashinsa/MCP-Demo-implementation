@@ -40,6 +40,7 @@ class SummaryRequest(BaseModel):
     context: Optional[str] = None
 
 
+
 def initialize_agent() -> None:
     global mcp_client, mcp_agent
 
@@ -52,7 +53,24 @@ def initialize_agent() -> None:
 
     mcp_client = MCPClient.from_config_file(str(SERVER_CONFIG))
     llm = ChatGroq(groq_api_key=groq_api_key, model="openai/gpt-oss-safeguard-20b")
-    mcp_agent = MCPAgent(client=mcp_client, llm=llm, max_steps=10, memory_enabled=True)
+    
+    # SYSTEM LOOP PROTECTION: Define clear behavioral instructions for the agent
+    system_instruction = (
+        "You are a helpful HR assistant. Crucial Rule: If a tool returns an empty result, "
+        "null, or indicates a resource/employee was not found, DO NOT call the same tool "
+        "with the same arguments again. Immediately stop and inform the user that the "
+        "requested information or employee could not be found."
+    )
+    
+    # We pass the instruction to the agent. If MCPAgent supports system_prompt, use it.
+    # Otherwise, we will inject it directly into the execution messages below.
+    mcp_agent = MCPAgent(
+        client=mcp_client, 
+        llm=llm, 
+        max_steps=10, 
+        memory_enabled=True
+    )
+
 
 
 @app.on_event("startup")
@@ -78,6 +96,9 @@ async def health() -> dict:
 REPORT_TRIGGER_WORDS = ("report", "pdf", "summary report", "one-pager", "printable")
 
 
+
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest) -> dict:
     if not mcp_agent:
@@ -85,11 +106,17 @@ async def chat(request: ChatRequest) -> dict:
 
     try:
         message_lower = request.message.lower()
-        full_message = request.message
+        
+        # Guardrails injected directly into the user message context to force LLM compliance
+        loop_guardrail = (
+            "[CRITICAL INSTRUCTION: If any search tool yields no results, "
+            "do not repeat the search. Respond directly stating nothing was found.]\n\n"
+        )
+        full_message = f"{loop_guardrail}{request.message}"
 
         if any(word in message_lower for word in REPORT_TRIGGER_WORDS) and REPORT_PROMPT_FILE.exists():
             instructions = REPORT_PROMPT_FILE.read_text(encoding="utf-8").strip()
-            full_message = f"{instructions}\n\nUser request: {request.message}"
+            full_message = f"{loop_guardrail}{instructions}\n\nUser request: {request.message}"
 
         response = await mcp_agent.run(full_message)
         return {"assistant": response}

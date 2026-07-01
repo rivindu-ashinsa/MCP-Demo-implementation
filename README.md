@@ -68,7 +68,14 @@ MCP-DEMO/
 │
 ├── reports/                     # Generated PDF reports land here at runtime (gitignored)
 │
-├── static/                      # Frontend — plain HTML/CSS/JS, no build step
+├── frontend/                    # Svelte + Vite frontend source
+│   ├── index.html
+│   ├── package.json
+│   └── src/
+│       ├── App.svelte
+│       └── main.js
+
+├── static/                      # Legacy fallback frontend assets
 │   ├── index.html
 │   ├── style.css
 │   └── chat.js
@@ -125,6 +132,25 @@ uv run uvicorn app.main:app --reload
 
 Go to **http://localhost:8000/** in your browser. The chat UI is served directly by FastAPI — no separate frontend server needed.
 
+### 6. Frontend development
+
+The main UI now lives in `frontend/` as a Svelte app.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+For production or to serve the Svelte build through FastAPI, run:
+
+```bash
+cd frontend
+npm run build
+```
+
+FastAPI will serve `frontend/dist/` from `/` when that build output exists.
+
 ---
 
 ## Available tools
@@ -165,7 +191,7 @@ To change the report template, edit the coordinates and styles in `services/repo
 
 ## Frontend
 
-Plain HTML/CSS/JS — no framework, no build step, no bundler. Markdown-style formatting from the LLM (`**bold**`, `` `code` ``, `[text](url)`) is rendered via a small in-house parser in `chat.js` rather than raw-displayed.
+The active UI is a Svelte component in `frontend/src/App.svelte`. It still uses the same lightweight markdown-safe rendering rules as the original chat UI, but the markup, behavior, and styles now live together in the component instead of separate HTML/CSS/JS files.
 
 ---
 

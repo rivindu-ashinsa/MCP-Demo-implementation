@@ -20,6 +20,10 @@ SERVER_CONFIG = PROJECT_ROOT / "server.json"
 SUMMARY_PROMPT_FILE = PROJECT_ROOT / "prompts" / "one_page_summary_prompt.txt"
 REPORT_PROMPT_FILE = PROJECT_ROOT / "prompts" / "employee_summary_prompt.txt"
 STATIC_DIR = PROJECT_ROOT / "static"
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
+FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -172,9 +176,14 @@ async def summary(request: SummaryRequest) -> dict:
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="frontend-assets")
 app.mount("/reports", StaticFiles(directory=str(REPORTS_DIR)), name="reports")
 
 
 @app.get("/")
 async def index():
+    if FRONTEND_INDEX_FILE.exists():
+        return FileResponse(str(FRONTEND_INDEX_FILE))
+
     return FileResponse(str(STATIC_DIR / "index.html"))

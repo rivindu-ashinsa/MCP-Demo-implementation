@@ -885,7 +885,7 @@
   .msg.error .msg-bubble {
     background: #fbeaea;
     border-left: 2px solid #c24a4a;
-    color: #8c2f2f;
+    color: #8c2f2f; 
   }
 
   .copy-btn {

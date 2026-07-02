@@ -1,6 +1,6 @@
 # Personnel Desk — MCP Employee Management Demo
 
-A small HR assistant that lets you ask natural-language questions about employees, departments, and leave balances, and generate one-page PDF summary reports — backed by an [MCP](https://modelcontextprotocol.io/) server and a Groq-powered LangChain agent, with a lightweight web chat UI.
+A small authenticated HR assistant that lets you ask natural-language questions about employees, departments, and leave balances, and generate one-page PDF summary reports — backed by an [MCP](https://modelcontextprotocol.io/) server, a FastAPI backend, and a Groq-powered LangChain agent, with a Svelte web UI.
 
 ```
 "how many departments are there?"        → 2 (Engineering, HR)
@@ -15,7 +15,7 @@ A small HR assistant that lets you ask natural-language questions about employee
 ```
 ┌──────────────┐      HTTP       ┌──────────────────┐      stdio       ┌────────────────────┐
 │  Chat UI     │ ───────────────▶│  FastAPI backend  │ ───────────────▶│  MCP server         │
-│ (static/)    │ ◀─────────────── │  (app/main.py)    │ ◀───────────────│  (mcp_server/)      │
+│ (frontend/)  │ ◀─────────────── │  (app/main.py)    │ ◀───────────────│  (mcp_server/)      │
 └──────────────┘   JSON / PDF     └──────────────────┘    tool calls    └────────────────────┘
                                           │                                       │
                                           ▼                                       ▼
@@ -29,6 +29,12 @@ A small HR assistant that lets you ask natural-language questions about employee
 3. The agent connects over **stdio** to the MCP server (`mcp_server/server.py`), which exposes tools for employees, departments, leave, and PDF report generation.
 4. The agent decides which tool(s) to call, the MCP server runs them against the JSON data file, and the result is returned as a chat reply — including a download link when a PDF report is generated.
 
+On a fresh database, startup seeds demo accounts so you can log in immediately:
+
+- Company code: `demo`
+- HR login: `admin` / `admin123`
+- Member login: `demo.employee` / `1`
+
 ---
 
 ## Project structure
@@ -36,13 +42,35 @@ A small HR assistant that lets you ask natural-language questions about employee
 ```
 MCP-DEMO/
 ├── app/
-│   └── main.py                  # FastAPI app: /chat, /summary, /health, static + report file serving
+│   └── main.py                  # FastAPI app: /chat, /summary, /health, frontend + report file serving
 │
+├── db/                          # SQLAlchemy models, session setup, startup seeding
+│   ├── models.py
+│   └── session.py
+
+├── core/                        # Request-scoped context helpers for the MCP tools
+│   └── context.py
+
+├── routers/                     # FastAPI routers for auth, chat, employees, departments
+│   ├── auth.py
+│   ├── chat.py
+│   ├── departments.py
+│   ├── deps.py
+│   └── employees.py
+
+├── repositories/                # Tenant-scoped database access helpers
+│   ├── base.py
+│   ├── company_repository.py
+│   ├── employee_repository.py
+│   └── user_repository.py
+
 ├── mcp_server/
 │   └── server.py                # MCP server entrypoint — registers all tools, prompts, resources
 │
 ├── services/                    # Plain Python — no MCP/agent code, just data logic
-│   ├── employee_service.py      # CRUD over data/employees.json
+│   ├── auth_service.py          # Password hashing + JWT helpers
+│   ├── credentials.py           # Username generation helpers
+│   ├── employee_service.py      # Tenant-scoped employee CRUD + seeded login provisioning
 │   ├── department_service.py    # Department lookups + reassignment
 │   ├── leave_service.py         # Leave balance + leave application
 │   ├── analytic_service.py      # Aggregate stats (headcounts, summaries)
@@ -63,10 +91,9 @@ MCP-DEMO/
 ├── resources/
 │   └── company_docs.py          # @mcp.resource() — leave policy & company policy text
 │
-├── data/
-│   └── employees.json           # The "database" — flat JSON file
+├── data/                        # SQLite database file lives here at runtime
 │
-├── reports/                     # Generated PDF reports land here at runtime (gitignored)
+├── reports/                     # Generated PDF reports land here at runtime (ignored)
 │
 ├── frontend/                    # Svelte + Vite frontend source
 │   ├── index.html
@@ -75,14 +102,6 @@ MCP-DEMO/
 │       ├── App.svelte
 │       └── main.js
 
-├── static/                      # Legacy fallback frontend assets
-│   ├── index.html
-│   ├── style.css
-│   └── chat.js
-│
-├── client/
-│   └── test_client.py           # Standalone script for testing the MCP server directly
-│
 ├── server.json                  # MCP client config (points at mcp_server/server.py)
 ├── pyproject.toml
 ├── .env                         # GROQ_API_KEY (not committed)
@@ -130,7 +149,12 @@ uv run uvicorn app.main:app --reload
 
 ### 5. Open the app
 
-Go to **http://localhost:8000/** in your browser. The chat UI is served directly by FastAPI — no separate frontend server needed.
+Go to **http://localhost:8000/** in your browser. The chat UI is served from the built Svelte app through FastAPI.
+
+Use one of the seeded demo accounts if you have not created your own users yet:
+
+- `demo` / `admin` / `admin123`
+- `demo` / `demo.employee` / `1`
 
 ### 6. Frontend development
 
@@ -150,6 +174,8 @@ npm run build
 ```
 
 FastAPI will serve `frontend/dist/` from `/` when that build output exists.
+
+The frontend dev server should proxy `/auth`, `/api`, `/chat`, `/summary`, `/health`, and `/reports` to `http://127.0.0.1:8000`.
 
 ---
 
@@ -198,8 +224,8 @@ The active UI is a Svelte component in `frontend/src/App.svelte`. It still uses 
 ## Known limitations
 
 - **Small/fast LLM (`llama-3.1-8b-instant`)** trades reliability for speed. It handles single, clearly-scoped tool calls well, but can struggle with multi-step planning or precise output formatting (e.g. transcribing a URL exactly). Where this matters — like the report download link — prefer extracting structured data server-side over trusting the model to repeat it verbatim.
-- **`data/employees.json` is a flat file**, not a real database — fine for a demo, not for concurrent writes for production use.
-- **No authentication** on any endpoint.
+- **The database is SQLite in `data/app.db`**, so it is fine for a demo but not for high-concurrency production use without additional safeguards.
+- **Demo credentials are seeded on startup** when no companies exist yet; set `SEED_DEFAULT_ACCOUNTS=false` in `.env` once you manage your own users.
 
 ---
 

@@ -12,4 +12,7 @@ wheels/
 # data
 data/
 
+# Generated reports
+reports/*.pdf
+
 .env

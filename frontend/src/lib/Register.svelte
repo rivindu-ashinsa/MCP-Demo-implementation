@@ -1,7 +1,7 @@
 <script>
-  import { login } from './auth.js';
+  import { register } from './auth.js';
 
-  export let onSwitchToRegister = () => {};
+  export let onSwitchToLogin = () => {};
 
   let companyCode = '';
   let username = '';
@@ -14,7 +14,7 @@
     error = '';
     isSubmitting = true;
     try {
-      await login(companyCode.trim(), username.trim(), password);
+      await register(companyCode.trim(), username.trim(), password);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -29,24 +29,36 @@
       <span id="brand-mark">PD</span>
       <div>
         <h1>Personnel Desk</h1>
-        <p>Sign in to your company workspace</p>
+        <p>Create your company workspace</p>
       </div>
     </div>
 
     <form on:submit|preventDefault={handleSubmit}>
       <label>
         <span>Company code</span>
-        <input type="text" bind:value={companyCode} placeholder="e.g. acme" autocomplete="organization" required />
+        <input
+          type="text"
+          bind:value={companyCode}
+          placeholder="e.g. acme"
+          autocomplete="organization"
+          required
+        />
       </label>
 
       <label>
         <span>Username</span>
-        <input type="text" bind:value={username} placeholder="your username" autocomplete="username" required />
+        <input type="text" bind:value={username} placeholder="choose a username" autocomplete="username" required />
       </label>
 
       <label>
         <span>Password</span>
-        <input type="password" bind:value={password} placeholder="••••••••" autocomplete="current-password" required />
+        <input
+          type="password"
+          bind:value={password}
+          placeholder="••••••••"
+          autocomplete="new-password"
+          required
+        />
       </label>
 
       {#if error}
@@ -54,13 +66,13 @@
       {/if}
 
       <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Signing in…' : 'Sign in'}
+        {isSubmitting ? 'Creating workspace…' : 'Create workspace'}
       </button>
     </form>
 
     <p id="login-hint">
-      Don't have a company workspace yet?
-      <button type="button" id="login-hint-link" on:click={onSwitchToRegister}>Create one</button>
+      Already have a workspace?
+      <button type="button" id="login-hint-link" on:click={onSwitchToLogin}>Sign in</button>
     </p>
   </div>
 </div>
@@ -70,23 +82,6 @@
   :global(*::before),
   :global(*::after) {
     box-sizing: border-box;
-  }
-
-  :global(body) {
-    margin: 0;
-    font-family: 'Inter', system-ui, sans-serif;
-  }
-
-  :global(:root) {
-    --navy: #1b2a4a;
-    --navy-light: #26314f;
-    --page-bg: #f4f6f9;
-    --panel: #ffffff;
-    --accent: #2f6fed;
-    --border: #e3e7ee;
-    --text-body: #1f2937;
-    --text-muted: #6b7280;
-    --danger: #e5484d;
   }
 
   #login-screen {

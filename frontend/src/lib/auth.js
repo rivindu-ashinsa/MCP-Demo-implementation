@@ -64,3 +64,26 @@ export async function authFetch(url, options = {}) {
 
   return response;
 }
+
+export async function register(companyCode, username, password) {
+  const response = await fetch('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company_code: companyCode, username, password }),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail ?? `Registration failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  auth.set({
+    token: data.access_token,
+    role: data.role,
+    username: data.username,
+    companyName: data.company_name,
+    employeeId: data.employee_id,
+  });
+  return data;
+}

@@ -10,14 +10,19 @@
 <script>
   import { auth } from './lib/auth.js';
   import Login from './lib/Login.svelte';
+  import Register from './lib/Register.svelte';
   import Dashboard from './lib/Dashboard.svelte';
 
   let session = null;
   auth.subscribe((v) => (session = v));
+
+  let view = 'login'; // 'login' | 'register' — only relevant while logged out
 </script>
 
 {#if session?.token}
   <Dashboard />
+{:else if view === 'register'}
+  <Register onSwitchToLogin={() => (view = 'login')} />
 {:else}
-  <Login />
+  <Login onSwitchToRegister={() => (view = 'register')} />
 {/if}

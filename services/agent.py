@@ -62,7 +62,7 @@ async def run_with_identity(token: str, message: str) -> str:
     one message, so there is nothing to remember, and — more importantly —
     nothing that could leak into the next user's turn.
     """
-    print(f"DEBUG token repr: {token!r}")   # <-- add this line
+    # print(f"DEBUG token repr: {token!r}")   # <-- add this line
 
     config = {
         "mcpServers": {

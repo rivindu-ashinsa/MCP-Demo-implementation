@@ -13,6 +13,7 @@ from db.session import init_db, seed_default_accounts
 from services.agent import initialize_agent, shutdown_agent
 from routers import auth, employees, departments, chat
 
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = PROJECT_ROOT / "static"
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"

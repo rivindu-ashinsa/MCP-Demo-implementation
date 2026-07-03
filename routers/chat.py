@@ -5,9 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from posthog import flush
 
-from services.agent import get_agent
-from core.context import set_context, reset_context
-from routers.deps import get_current_user
+from services.agent import run_with_identity
+from routers.deps import get_bearer_token
 
 router = APIRouter(tags=["chat"])
 
@@ -35,19 +34,8 @@ def _is_report_request(message_lower: str) -> bool:
     return any(word in message_lower for word in REPORT_TRIGGER_WORDS)
 
 
-def _scoped(user: dict):
-    return set_context(
-        company_id=user["company_id"],
-        role=user["role"],
-        employee_id=user.get("employee_id"),
-        username=user["username"],
-    )
-
-
 @router.post("/chat")
-async def chat(request: ChatRequest, user: dict = Depends(get_current_user)) -> dict:
-    agent = get_agent()
-    token = _scoped(user)
+async def chat(request: ChatRequest, token: str = Depends(get_bearer_token)) -> dict:
     try:
         message_lower = request.message.lower()
 
@@ -57,19 +45,15 @@ async def chat(request: ChatRequest, user: dict = Depends(get_current_user)) -> 
         else:
             full_message = f"{LOOP_GUARDRAIL}{request.message}"
 
-        response = await agent.run(full_message)
+        response = await run_with_identity(token, full_message)
         flush()
         return {"assistant": response}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        reset_context(token)
 
 
 @router.post("/summary")
-async def summary(request: SummaryRequest, user: dict = Depends(get_current_user)) -> dict:
-    agent = get_agent()
-
+async def summary(request: SummaryRequest, token: str = Depends(get_bearer_token)) -> dict:
     if not SUMMARY_PROMPT_FILE.exists():
         raise HTTPException(status_code=500, detail=f"Prompt file not found at {SUMMARY_PROMPT_FILE}")
 
@@ -80,12 +64,9 @@ async def summary(request: SummaryRequest, user: dict = Depends(get_current_user
     )
     body = f"{prompt}\n\nSubject: {request.subject}\n\nContext: {context}"
 
-    token = _scoped(user)
     try:
-        response = await agent.run(body)
+        response = await run_with_identity(token, body)
         flush()
         return {"summary": response}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        reset_context(token)

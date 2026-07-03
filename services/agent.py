@@ -1,12 +1,10 @@
 import os
-from pathlib import Path
 from typing import Optional
 
 from langchain_groq import ChatGroq
 from mcp_use import MCPAgent, MCPClient
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SERVER_CONFIG = PROJECT_ROOT / "server.json"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8765/mcp")
 
 SYSTEM_INSTRUCTION = (
     "You are a helpful HR assistant. "
@@ -19,40 +17,73 @@ SYSTEM_INSTRUCTION = (
     "the user which company or employee id to filter by."
 )
 
-_client: Optional[MCPClient] = None
-_agent: Optional[MCPAgent] = None
+_llm: Optional[ChatGroq] = None
 
 
 def initialize_agent() -> None:
-    """Synchronous initializer — call via asyncio.to_thread from the FastAPI lifespan."""
-    global _client, _agent
+    """
+    Validates config and builds the (stateless, shareable) LLM client at
+    startup. Unlike before, this does NOT build a shared MCPClient/MCPAgent
+    — those are now built fresh per request in run_with_identity(), because
+    each one needs to carry a *different* user's bearer token to the MCP
+    server as an HTTP header. A single shared client can't vary that per
+    concurrent request, which was the root cause of both the "no request
+    context set" crash and the earlier cross-user chat-memory concern.
+    """
+    global _llm
 
     groq_api_key = os.getenv("GROQ_API_KEY")
     if not groq_api_key:
         raise RuntimeError("GROQ_API_KEY environment variable is not set")
 
-    if not SERVER_CONFIG.exists():
-        raise RuntimeError(f"MCP configuration file not found at {SERVER_CONFIG}")
-
-    _client = MCPClient.from_config_file(str(SERVER_CONFIG))
-    llm = ChatGroq(groq_api_key=groq_api_key, model="openai/gpt-oss-safeguard-20b")
-
-    _agent = MCPAgent(
-        client=_client,
-        llm=llm,
-        max_steps=10,
-        memory_enabled=True,
-        system_prompt=SYSTEM_INSTRUCTION,
-    )
+    _llm = ChatGroq(groq_api_key=groq_api_key, model="openai/gpt-oss-safeguard-20b")
 
 
 async def shutdown_agent() -> None:
-    global _client
-    if _client and getattr(_client, "sessions", None):
-        await _client.close_all_sessions()
+    global _llm
+
+    _llm = None
 
 
-def get_agent() -> MCPAgent:
-    if _agent is None:
-        raise RuntimeError("MCP agent is not initialized")
-    return _agent
+def _get_llm() -> ChatGroq:
+    if _llm is None:
+        raise RuntimeError("LLM is not initialized")
+    return _llm
+
+
+async def run_with_identity(token: str, message: str) -> str:
+    """
+    Builds a short-lived MCPClient/MCPAgent scoped to exactly one request,
+    with `token` forwarded as the Authorization header on the connection to
+    the MCP server. That header is what mcp_server/server.py's
+    TenantContextMiddleware reads to scope every tool call this agent makes.
+
+    memory_enabled is intentionally False: this client is thrown away after
+    one message, so there is nothing to remember, and — more importantly —
+    nothing that could leak into the next user's turn.
+    """
+    print(f"DEBUG token repr: {token!r}")   # <-- add this line
+
+    config = {
+        "mcpServers": {
+            "server": {
+                "transport": "http",
+                "url": f"{MCP_SERVER_URL}?token={token}",
+                "auth": None,
+            }
+        }
+    }
+
+    client = MCPClient.from_dict(config)
+    try:
+        agent = MCPAgent(
+            client=client,
+            llm=_get_llm(),
+            max_steps=10,
+            memory_enabled=False,
+            system_prompt=SYSTEM_INSTRUCTION,
+        )
+        return await agent.run(message)
+    finally:
+        if getattr(client, "sessions", None):
+            await client.close_all_sessions()

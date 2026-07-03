@@ -1,15 +1,7 @@
 {
-    "mcpServers" : {
-        "server" : {
-            "command" : "uv", 
-            "args" : [
-                "run", 
-                "--with", 
-                "mcp[cli]", 
-                "mcp", 
-                "run", 
-                "D:\\MCP-DEMO\\mcp_server\\server.py"
-            ]
+    "mcpServers": {
+        "server": {
+            "url": "http://127.0.0.1:8765/mcp"
         }
     }
 }

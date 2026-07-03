@@ -47,6 +47,70 @@
   let createError = '';
   let lastCreatedLogin = null;
 
+  let editingId = null;
+  let editValue = 0;
+  let rowBusyId = null;
+  let rowError = {};
+
+  function startEdit(emp) {
+    editingId = emp.id;
+    editValue = emp.leave_balance;
+    rowError = { ...rowError, [emp.id]: undefined };
+  }
+
+  function cancelEdit() {
+    editingId = null;
+  }
+
+  async function saveEdit(emp) {
+    rowBusyId = emp.id;
+    rowError = { ...rowError, [emp.id]: undefined };
+
+    try {
+      const res = await authFetch(`/api/employees/${emp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leave_balance: Number(editValue) || 0 }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        rowError = { ...rowError, [emp.id]: body.detail ?? `Couldn't save (${res.status}).` };
+        return;
+      }
+
+      editingId = null;
+      await loadData();
+    } catch (e) {
+      rowError = { ...rowError, [emp.id]: e instanceof Error ? e.message : String(e) };
+    } finally {
+      rowBusyId = null;
+    }
+  }
+
+  async function removeEmployee(emp) {
+    if (!confirm(`Remove ${emp.name}? This also deletes their login. This can't be undone.`)) return;
+
+    rowBusyId = emp.id;
+    rowError = { ...rowError, [emp.id]: undefined };
+
+    try {
+      const res = await authFetch(`/api/employees/${emp.id}`, { method: 'DELETE' });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        rowError = { ...rowError, [emp.id]: body.detail ?? `Couldn't remove (${res.status}).` };
+        return;
+      }
+
+      await loadData();
+    } catch (e) {
+      rowError = { ...rowError, [emp.id]: e instanceof Error ? e.message : String(e) };
+    } finally {
+      rowBusyId = null;
+    }
+  }
+
   async function submitNewEmployee() {
     const name = newName.trim();
     if (!name || isCreating) return;
@@ -231,7 +295,7 @@
 
           <table id="employee-table">
             <thead>
-              <tr><th>Name</th><th>Department</th><th>Leave balance</th></tr>
+              <tr><th>Name</th><th>Department</th><th>Leave balance</th><th></th></tr>
             </thead>
             <tbody>
               {#each employees as emp (emp.id)}
@@ -239,9 +303,31 @@
                   <td>{emp.name}</td>
                   <td><span class="dept-pill">{emp.department}</span></td>
                   <td>
-                    <span class="leave-pill" class:low={emp.leave_balance <= 2}>{emp.leave_balance} days</span>
+                    {#if editingId === emp.id}
+                      <input class="edit-balance-input" type="number" min="0" bind:value={editValue} />
+                    {:else}
+                      <span class="leave-pill" class:low={emp.leave_balance <= 2}>{emp.leave_balance} days</span>
+                    {/if}
+                  </td>
+                  <td class="row-actions">
+                    {#if editingId === emp.id}
+                      <button class="row-btn save" on:click={() => saveEdit(emp)} disabled={rowBusyId === emp.id}>
+                        {rowBusyId === emp.id ? 'Saving…' : 'Save'}
+                      </button>
+                      <button class="row-btn" on:click={cancelEdit}>Cancel</button>
+                    {:else}
+                      <button class="row-btn" on:click={() => startEdit(emp)}>Edit</button>
+                      <button class="row-btn danger" on:click={() => removeEmployee(emp)} disabled={rowBusyId === emp.id}>
+                        {rowBusyId === emp.id ? 'Removing…' : 'Delete'}
+                      </button>
+                    {/if}
                   </td>
                 </tr>
+                {#if rowError[emp.id]}
+                  <tr class="row-error-line">
+                    <td colspan="4">{rowError[emp.id]}</td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>
@@ -695,6 +781,62 @@
   .leave-pill.low {
     background: #fdeee0;
     color: var(--amber);
+  }
+
+  .edit-balance-input {
+    width: 70px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    font-family: inherit;
+    font-size: 12.5px;
+    outline: none;
+  }
+
+  .row-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    white-space: nowrap;
+  }
+
+  .row-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-body);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .row-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .row-btn.save {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .row-btn.danger:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  .row-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .row-error-line td {
+    padding: 4px 10px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--danger);
   }
 
   .muted {

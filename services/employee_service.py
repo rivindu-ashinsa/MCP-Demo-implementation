@@ -147,6 +147,9 @@ def load_employees() -> list[dict]:
 
 
 def save_employees(employees: list[dict]) -> None:
+    if get_role() != "hr":
+        raise ForbiddenError("Only HR can bulk-update employees.")
+
     with session_scope() as db:
         repo = EmployeeRepository(db, get_company_id())
         for payload in employees:

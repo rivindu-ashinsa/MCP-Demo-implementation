@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 
 from db.session import init_db, seed_default_accounts
 from services.agent import initialize_agent, shutdown_agent
-from routers import auth, employees, departments, chat
+from routers import auth, employees, departments, chat, leave
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -77,6 +77,7 @@ app.include_router(auth.router)
 app.include_router(employees.router)
 app.include_router(departments.router)
 app.include_router(chat.router)
+app.include_router(leave.router)
 
 
 @app.get("/health")

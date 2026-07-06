@@ -6,7 +6,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.dependencies import get_http_request   # <-- was get_http_headers
+from fastmcp.server.dependencies import get_http_request
 from fastmcp.exceptions import ToolError
 
 from tools import (employee_tools, department_tools, analytic_tools, leave_tools, report_tools)
@@ -19,6 +19,7 @@ from resources.company_docs import (
 
 from services.auth_service import decode_access_token, TokenError
 from core.context import set_context, reset_context
+
 MCP_SERVER_HOST = os.getenv("MCP_SERVER_HOST", "127.0.0.1")
 MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8765"))
 
@@ -33,16 +34,26 @@ class TenantContextMiddleware(Middleware):
     of this one tool call, so employee_service and friends stay correctly
     scoped no matter which process is calling them.
 
+    Reads the token off the Authorization header via get_http_request().
+    NOTE: this deliberately does NOT use fastmcp's get_http_headers()
+    shorthand — it's known to return empty/stale results inside
+    on_call_tool on some fastmcp versions (see jlowin/fastmcp #1291, #817,
+    #1233). Going through the Request object directly is more reliable.
+    Do not switch this to a URL query parameter instead — that puts the
+    JWT in plaintext in any access/proxy log that ever gets added in front
+    of this server.
+
     No token, or an invalid/expired one -> the tool never runs at all.
     """
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         request = get_http_request()
-        token = request.query_params.get("token")
+        auth_header = request.headers.get("authorization", "")
 
-        if not token:
-            raise ToolError("Missing token on MCP request.")
+        if not auth_header.lower().startswith("bearer "):
+            raise ToolError("Missing bearer token on MCP request.")
 
+        token = auth_header.split(" ", 1)[1]
         try:
             claims = decode_access_token(token)
         except TokenError as exc:
@@ -73,11 +84,13 @@ report_prompts.register(mcp)
 
 @mcp.resource("company://leave-policy")
 def leave_policy_resource():
+    """includes all the information about default leave balances"""
     return leave_policy()
 
 
 @mcp.resource("company://company-policy")
 def company_policy_resource():
+    """includes all the information about company policies"""
     return company_policy()
 
 

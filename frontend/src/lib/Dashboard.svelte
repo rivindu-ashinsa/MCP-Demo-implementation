@@ -6,11 +6,25 @@
   let me = null;
   auth.subscribe((v) => (me = v));
 
-  let view = 'overview'; // 'overview' | 'employees' | 'chat'
+  let view = 'overview'; // 'overview' | 'employees' | 'leave' | 'chat'
   let employees = [];
   let headcounts = {};
   let isLoading = true;
   let loadError = '';
+
+  let leaveRequests = [];
+  let leaveStatusFilter = 'pending'; // HR only
+  let isLoadingLeave = false;
+  let leaveListError = '';
+
+  let newLeaveStart = '';
+  let newLeaveEnd = '';
+  let newLeaveReason = '';
+  let isSubmittingLeave = false;
+  let submitLeaveError = '';
+
+  let decidingId = null;
+  let leaveRowError = {};
 
   const isHr = () => me?.role === 'hr';
 
@@ -37,7 +51,88 @@
     }
   }
 
-  onMount(loadData);
+  async function loadLeaveRequests() {
+    isLoadingLeave = true;
+    leaveListError = '';
+    try {
+      const query = isHr() && leaveStatusFilter ? `?status=${leaveStatusFilter}` : '';
+      const res = await authFetch(`/api/leave/requests${query}`);
+      if (res.ok) {
+        leaveRequests = await res.json();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        leaveListError = body.detail ?? `Couldn't load leave requests (${res.status}).`;
+      }
+    } catch (e) {
+      leaveListError = e instanceof Error ? e.message : String(e);
+    } finally {
+      isLoadingLeave = false;
+    }
+  }
+
+  async function submitLeaveRequest() {
+    if (isSubmittingLeave || !newLeaveStart || !newLeaveEnd) return;
+
+    isSubmittingLeave = true;
+    submitLeaveError = '';
+
+    try {
+      const res = await authFetch('/api/leave/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: newLeaveStart,
+          end_date: newLeaveEnd,
+          reason: newLeaveReason.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        submitLeaveError = body.detail ?? `Couldn't submit request (${res.status}).`;
+        return;
+      }
+
+      newLeaveStart = '';
+      newLeaveEnd = '';
+      newLeaveReason = '';
+      await loadLeaveRequests();
+    } catch (e) {
+      submitLeaveError = e instanceof Error ? e.message : String(e);
+    } finally {
+      isSubmittingLeave = false;
+    }
+  }
+
+  async function decideRequest(req, approve) {
+    decidingId = req.id;
+    leaveRowError = { ...leaveRowError, [req.id]: undefined };
+
+    try {
+      const res = await authFetch(`/api/leave/requests/${req.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        leaveRowError = { ...leaveRowError, [req.id]: body.detail ?? `Couldn't save (${res.status}).` };
+        return;
+      }
+
+      await Promise.all([loadLeaveRequests(), loadData()]); // approving changes leave_balance too
+    } catch (e) {
+      leaveRowError = { ...leaveRowError, [req.id]: e instanceof Error ? e.message : String(e) };
+    } finally {
+      decidingId = null;
+    }
+  }
+
+  onMount(() => {
+    loadData();
+    loadLeaveRequests();
+  });
 
   let showAddForm = false;
   let newName = '';
@@ -176,6 +271,13 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M17 20v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2M10 10a4 4 0 100-8 4 4 0 000 8zM23 20v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>{isHr() ? 'Employees' : 'My record'}</span>
       </button>
+      <button class:active={view === 'leave'} on:click={() => (view = 'leave')}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span>{isHr() ? 'Leave requests' : 'My leave'}</span>
+        {#if isHr() && leaveRequests.length && leaveStatusFilter === 'pending'}
+          <span class="tab-count">{leaveRequests.length}</span>
+        {/if}
+      </button>
       <button class:active={view === 'chat'} on:click={() => (view = 'chat')}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 5h16v11H8l-4 4V5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         <span>Ask the desk</span>
@@ -198,6 +300,7 @@
       <h2>
         {#if view === 'overview'}Overview
         {:else if view === 'employees'}{isHr() ? 'Employees' : 'My record'}
+        {:else if view === 'leave'}{isHr() ? 'Leave requests' : 'My leave'}
         {:else}Ask the desk{/if}
       </h2>
       <span id="dash-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
@@ -341,6 +444,99 @@
           </dl>
         </div>
       {/if}
+    {:else if view === 'leave'}
+      {#if !isHr()}
+        <div class="panel">
+          <h3>Request leave</h3>
+          <form id="leave-request-form" on:submit|preventDefault={submitLeaveRequest}>
+            <label>
+              <span>Start date</span>
+              <input type="date" bind:value={newLeaveStart} required />
+            </label>
+            <label>
+              <span>End date</span>
+              <input type="date" bind:value={newLeaveEnd} required />
+            </label>
+            <label>
+              <span>Reason (optional)</span>
+              <input type="text" bind:value={newLeaveReason} placeholder="e.g. Family trip" />
+            </label>
+            <button type="submit" disabled={isSubmittingLeave || !newLeaveStart || !newLeaveEnd}>
+              {isSubmittingLeave ? 'Submitting…' : 'Submit request'}
+            </button>
+            {#if submitLeaveError}
+              <p class="form-error">{submitLeaveError}</p>
+            {/if}
+          </form>
+        </div>
+      {/if}
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h3>{isHr() ? 'Leave requests' : 'Your requests'}</h3>
+          {#if isHr()}
+            <select class="status-filter" bind:value={leaveStatusFilter} on:change={loadLeaveRequests}>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="">All</option>
+            </select>
+          {/if}
+        </div>
+
+        {#if leaveListError}
+          <p class="form-error">{leaveListError}</p>
+        {/if}
+
+        {#if isLoadingLeave}
+          <p class="muted">Loading…</p>
+        {:else if leaveRequests.length === 0}
+          <p class="muted">No leave requests{isHr() ? ' match this filter' : ' yet'}.</p>
+        {:else}
+          <table id="leave-table">
+            <thead>
+              <tr>
+                {#if isHr()}<th>Employee</th>{/if}
+                <th>Dates</th>
+                <th>Days</th>
+                <th>Reason</th>
+                <th>Status</th>
+                {#if isHr()}<th></th>{/if}
+              </tr>
+            </thead>
+            <tbody>
+              {#each leaveRequests as req (req.id)}
+                <tr>
+                  {#if isHr()}<td>{req.employee_name}</td>{/if}
+                  <td>{req.start_date} → {req.end_date}</td>
+                  <td>{req.days}</td>
+                  <td>{req.reason ?? '—'}</td>
+                  <td><span class="status-pill {req.status}">{req.status}</span></td>
+                  {#if isHr()}
+                    <td class="row-actions">
+                      {#if req.status === 'pending'}
+                        <button class="row-btn save" on:click={() => decideRequest(req, true)} disabled={decidingId === req.id}>
+                          {decidingId === req.id ? '…' : 'Approve'}
+                        </button>
+                        <button class="row-btn danger" on:click={() => decideRequest(req, false)} disabled={decidingId === req.id}>
+                          {decidingId === req.id ? '…' : 'Reject'}
+                        </button>
+                      {:else}
+                        <span class="decided-note">by {req.decided_by}</span>
+                      {/if}
+                    </td>
+                  {/if}
+                </tr>
+                {#if leaveRowError[req.id]}
+                  <tr class="row-error-line">
+                    <td colspan={isHr() ? 6 : 4}>{leaveRowError[req.id]}</td>
+                  </tr>
+                {/if}
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
     {:else}
       <div id="chat-wrap">
         <ChatPanel />
@@ -844,6 +1040,134 @@
     font-size: 13.5px;
   }
 
+  .tab-count {
+    margin-left: auto;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 20px;
+    line-height: 1.5;
+  }
+
+  #leave-request-form {
+    display: grid;
+    grid-template-columns: 160px 160px 1fr auto;
+    gap: 10px;
+    align-items: end;
+    padding: 14px;
+    margin-bottom: 4px;
+    background: var(--page-bg);
+    border-radius: 9px;
+    border: 1px solid var(--border);
+  }
+
+  #leave-request-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  #leave-request-form input {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    outline: none;
+  }
+
+  #leave-request-form input:focus {
+    border-color: var(--accent);
+  }
+
+  #leave-request-form button[type='submit'] {
+    padding: 9px 14px;
+    border-radius: 7px;
+    border: none;
+    background: var(--navy);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    height: fit-content;
+  }
+
+  #leave-request-form button[type='submit']:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .status-filter {
+    padding: 6px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    font-size: 12.5px;
+    color: var(--text-body);
+  }
+
+  #leave-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    margin-top: 14px;
+  }
+
+  #leave-table th {
+    text-align: left;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    padding: 0 10px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #leave-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-body);
+  }
+
+  #leave-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .status-pill.pending {
+    background: #fdeee0;
+    color: var(--amber);
+  }
+
+  .status-pill.approved {
+    background: #e6f4ee;
+    color: var(--green);
+  }
+
+  .status-pill.rejected {
+    background: #fbeaea;
+    color: var(--danger);
+  }
+
+  .decided-note {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
   #chat-wrap {
     height: calc(100vh - 140px);
   }
@@ -889,6 +1213,10 @@
     }
 
     #add-employee-form {
+      grid-template-columns: 1fr;
+    }
+
+    #leave-request-form {
       grid-template-columns: 1fr;
     }
   }

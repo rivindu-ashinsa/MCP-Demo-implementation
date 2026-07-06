@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
+    Date,
     ForeignKey,
     DateTime,
     UniqueConstraint,
@@ -63,3 +64,27 @@ class User(Base):
 
     company = relationship("Company", back_populates="users")
     employee = relationship("Employee", back_populates="user")
+
+
+class LeaveRequest(Base):
+    __tablename__ = "leave_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_leave_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    days = Column(Integer, nullable=False)  # computed at request time, inclusive of both dates
+    reason = Column(String, nullable=True)
+
+    status = Column(String, nullable=False, default="pending")  # 'pending' | 'approved' | 'rejected'
+    requested_at = Column(DateTime, default=_utcnow, nullable=False)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(String, nullable=True)  # username of the HR account that decided it
+
+    company = relationship("Company")
+    employee = relationship("Employee")

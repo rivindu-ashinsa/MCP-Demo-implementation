@@ -13,9 +13,9 @@ A small HR assistant that lets you ask natural-language questions about employee
 ## How it works
 
 ```
-┌──────────────┐      HTTP       ┌──────────────────┐      stdio       ┌────────────────────┐
+┌──────────────┐      HTTP       ┌──────────────────┐      HTTP       ┌────────────────────┐
 │  Chat UI     │ ───────────────▶│  FastAPI backend  │ ───────────────▶│  MCP server         │
-│ (static/)    │ ◀─────────────── │  (app/main.py)    │ ◀───────────────│  (mcp_server/)      │
+│(frontend/)   │ ◀─────────────── │  (app/main.py)    │ ◀───────────────│  (mcp_server/)      │
 └──────────────┘   JSON / PDF     └──────────────────┘    tool calls    └────────────────────┘
                                           │                                       │
                                           ▼                                       ▼
@@ -25,9 +25,10 @@ A small HR assistant that lets you ask natural-language questions about employee
 ```
 
 1. The browser sends a chat message to `POST /chat`.
-2. FastAPI hands the message to an `MCPAgent` (from [`mcp_use`](https://github.com/mcp-use/mcp-use)), backed by a Groq LLM (`llama-3.1-8b-instant` via `langchain_groq`).
-3. The agent connects over **stdio** to the MCP server (`mcp_server/server.py`), which exposes tools for employees, departments, leave, and PDF report generation.
-4. The agent decides which tool(s) to call, the MCP server runs them against the JSON data file, and the result is returned as a chat reply — including a download link when a PDF report is generated.
+2. FastAPI hands the message to an `MCPAgent` (from [`mcp_use`](https://github.com/mcp-use/mcp-use)), backed by a Groq LLM (`openai/gpt-oss-safeguard-20b` via `langchain_groq`).
+3. The agent connects over **HTTP** to the MCP server (`mcp_server/server.py`), which is automatically started by FastAPI's lifespan handler on app startup (controlled by `MCP_SERVER_AUTOSTART` env var).
+4. The agent forwards the user's JWT bearer token to the MCP server, which uses `TenantContextMiddleware` to scope all tool calls to the authenticated user's company and role.
+5. The MCP server runs the appropriate tools against the data/database, and the result is returned as a chat reply — including a download link when a PDF report is generated.
 
 ---
 
@@ -82,13 +83,17 @@ MCP-DEMO/
 ├── frontend/                    # Svelte + Vite frontend source
 │   ├── index.html
 │   ├── package.json
+│   ├── svelte.config.js
+│   ├── vite.config.js
 │   └── src/
 │       ├── App.svelte
-│       └── main.js
+│       ├── main.js
 │       └── lib/
-│             ├── ChatPanel.svelte
-│             └── DashBoard.svelte
-│             └── Login.svelte
+│           ├── auth.js
+│           ├── ChatPanel.svelte
+│           ├── Dashboard.svelte
+│           ├── Login.svelte
+│           └── Register.svelte
 
 ├── static/                      # Legacy fallback frontend assets
 │   ├── index.html
@@ -128,25 +133,27 @@ Create a `.env` file in the project root:
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-### 3. Verify the MCP server starts cleanly (optional but recommended)
-
-```bash
-uv run --with mcp[cli] mcp run mcp_server/server.py
-```
-
-If this exits immediately or throws an import error, fix that before starting the backend — the FastAPI app will fail in the same way, just with a less direct error message.
-
-### 4. Run the backend
+### 3. Run the backend
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-### 5. Open the app
+The FastAPI app will automatically start the MCP server on `127.0.0.1:8765` during startup (controlled by `MCP_SERVER_AUTOSTART=true` in `.env`). To disable autostart and run the MCP server separately in another terminal:
+
+```bash
+# Terminal 1: Backend only (autostart disabled)
+MCP_SERVER_AUTOSTART=false uv run uvicorn app.main:app --reload
+
+# Terminal 2: MCP server (manual)
+uv run python mcp_server/server.py
+```
+
+### 4. Open the app
 
 Go to **http://localhost:8000/** in your browser. The chat UI is served directly by FastAPI — no separate frontend server needed.
 
-### 6. Frontend development
+### 5. Frontend development (optional)
 
 The main UI now lives in `frontend/` as a Svelte app.
 
@@ -220,7 +227,10 @@ The active UI is a Svelte component in `frontend/src/App.svelte`. It still uses 
 ## Troubleshooting
 
 **MCP server won't start / `/chat` returns 500 immediately on startup:**
-Run `uv run --with mcp[cli] mcp run mcp_server/server.py` directly to see the real traceback — FastAPI's logs often just say "the underlying process closed the connection during initialization" without the actual cause.
+The MCP server is started automatically as a subprocess by FastAPI during lifespan startup. Check the console logs from `uvicorn app.main:app --reload` for any errors from the MCP process. If you see connection errors, verify that port 8765 is available and not already in use. You can also set `MCP_SERVER_AUTOSTART=false` and run the server manually in a separate terminal to see more detailed error output:
+```bash
+python mcp_server/server.py
+```
 
 **A generated PDF 404s when opened:**
 Check that `REPORTS_DIR` in `app/main.py` and `BASE_DIR` in `services/report_service.py` resolve to the *same* folder. Both should point at the project root's `reports/` directory, not a subfolder.
